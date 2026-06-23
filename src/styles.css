@@ -14,7 +14,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
     --bg: #0f1419;
     --panel: #171e26;
@@ -26,6 +26,34 @@
     --soft: #172b27;
     --shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1419;
+  --panel: #171e26;
+  --ink: #e3e8ef;
+  --muted: #96a3b4;
+  --line: #2b3542;
+  --accent: #59b59d;
+  --accent-2: #7ea7df;
+  --soft: #172b27;
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f6f8;
+  --panel: #ffffff;
+  --ink: #1e2732;
+  --muted: #687386;
+  --line: #dce3eb;
+  --accent: #1f7a68;
+  --accent-2: #315f9c;
+  --warn: #a65f00;
+  --bad: #b43a34;
+  --soft: #e8f3f0;
+  --shadow: 0 12px 30px rgba(23, 34, 48, 0.08);
 }
 
 * { box-sizing: border-box; }
@@ -128,7 +156,7 @@ section, .study-card, .editor {
 }
 .metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
   background: transparent;
   border: 0;
@@ -267,6 +295,33 @@ label input[type="checkbox"] {
   border-radius: 6px;
   background: var(--bg);
   cursor: zoom-in;
+}
+.image-grid figure {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--bg);
+}
+.image-grid figure img {
+  border: 0;
+}
+.image-grid figcaption {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+.image-actions {
+  display: flex;
+  gap: 6px;
+}
+.image-actions button {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.ghost.danger {
+  color: var(--bad);
 }
 .timeline {
   display: grid;

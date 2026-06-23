@@ -1,5 +1,5 @@
 import { initSupabase, supabase, isConfigured } from "./supabaseClient.js";
-import { STORAGE_BUCKET } from "./config.js";
+import { STORAGE_BUCKET, SUPABASE_URL } from "./config.js";
 import { ANALYSIS_SUMMARY, CHAPTERS, NOTE_SEEDS, QUESTION_SEEDS, SOURCE_SEEDS } from "./data/seed.js";
 
 const state = {
@@ -16,12 +16,18 @@ const state = {
   studyReveal: false,
   busy: false,
   loadError: "",
+  theme: localStorage.getItem("ic-study-theme") || "auto",
 };
 
 const $ = (selector) => document.querySelector(selector);
 const app = $("#app");
 const localKey = "ic-study-progress";
 const configKey = "ic-study-config-hint-hidden";
+const themeKey = "ic-study-theme";
+
+function applyTheme() {
+  document.documentElement.dataset.theme = state.theme;
+}
 
 function escapeHtml(value = "") {
   return String(value)
@@ -95,7 +101,16 @@ function showToast(message, type = "ok") {
   setTimeout(() => el.remove(), 2600);
 }
 
+function sourceOf(item) {
+  return item.source_text || item.source || item.path || "";
+}
+
+function isPending(item) {
+  return ["待补充", "待完善", "待整理"].includes(statusOf(item));
+}
+
 async function init() {
+  applyTheme();
   await initSupabase();
   if (isConfigured) {
     const { data } = await supabase.auth.getSession();
@@ -254,6 +269,7 @@ async function saveQuestion(form) {
 async function saveNote(form) {
   if (!state.session) return showToast("登录后才能新增或编辑", "bad");
   const id = form.id.value;
+  const selectedQuestionIds = Array.from(form.related_question_ids.selectedOptions).map((x) => x.value);
   const payload = {
     title: form.title.value.trim(),
     body: form.body.value.trim(),
@@ -262,7 +278,7 @@ async function saveNote(form) {
     formulas: form.formulas.value.trim(),
     source_text: form.source_text.value.trim(),
     status: form.status.value,
-    related_question_ids: Array.from(form.related_question_ids.selectedOptions).map((x) => x.value),
+    related_question_ids: selectedQuestionIds,
     updated_by: currentUserId(),
   };
   if (!id) payload.created_by = currentUserId();
@@ -273,11 +289,43 @@ async function saveNote(form) {
   if (error) return showToast(error.message, "bad");
   try {
     await uploadFiles(form.images.files, "note", data.id);
+    await syncNoteQuestionLinks(data.id, selectedQuestionIds);
   } catch (error) {
     showToast(error.message, "bad");
   }
   showToast(id ? "知识点已更新" : "知识点已新增");
   state.view = "notes";
+  await loadAll();
+}
+
+async function syncNoteQuestionLinks(noteId, questionIds) {
+  if (!isConfigured || !noteId || String(noteId).startsWith("seed-")) return;
+  const existing = await supabase.from("note_question_links").select("*").eq("note_id", noteId);
+  if (existing.error) throw existing.error;
+  const current = existing.data || [];
+  const wanted = new Set(questionIds);
+  const userId = currentUserId();
+  const toArchive = current.filter((x) => !wanted.has(String(x.question_id)) && !x.archived);
+  for (const link of toArchive) {
+    const res = await supabase
+      .from("note_question_links")
+      .update({ archived: true, updated_by: userId })
+      .eq("note_id", noteId)
+      .eq("question_id", link.question_id);
+    if (res.error) throw res.error;
+  }
+  for (const questionId of questionIds) {
+    const payload = { note_id: noteId, question_id: questionId, archived: false, created_by: userId, updated_by: userId };
+    const res = await supabase.from("note_question_links").upsert(payload, { onConflict: "note_id,question_id" });
+    if (res.error) throw res.error;
+  }
+}
+
+async function archiveAttachment(id) {
+  if (!state.session || !isConfigured) return showToast("登录后才能归档附件记录", "bad");
+  const { error } = await supabase.from("attachments").update({ archived: true, updated_by: currentUserId() }).eq("id", id);
+  if (error) return showToast(error.message, "bad");
+  showToast("图片记录已归档，没有物理删除");
   await loadAll();
 }
 
@@ -349,13 +397,15 @@ function unique(values) {
 function filteredQuestions() {
   const f = state.filters;
   return state.questions.filter((q) => {
-    const text = [q.title, q.answer, q.analysis, q.source_text, q.source, ...(q.tags || [])].join(" ").toLowerCase();
+    const src = sourceOf(q);
+    const text = [q.title, q.answer, q.analysis, src, ...(q.tags || [])].join(" ").toLowerCase();
     if (f.keyword && !text.includes(f.keyword.toLowerCase())) return false;
     if (f.chapter && q.chapter !== f.chapter) return false;
     if (f.type && q.type !== f.type) return false;
     if (f.difficulty && q.difficulty !== f.difficulty) return false;
     if (f.tag && !(q.tags || []).includes(f.tag)) return false;
-    if (f.pending && !["待补充", "待完善", "待整理"].includes(statusOf(q))) return false;
+    if (f.source && src !== f.source) return false;
+    if (f.pending && !isPending(q)) return false;
     if (f.noAnswer && q.answer) return false;
     if (f.noAnalysis && q.analysis) return false;
     if (f.calcOnly && q.type !== "计算题") return false;
@@ -366,11 +416,13 @@ function filteredQuestions() {
 function filteredNotes() {
   const f = state.filters;
   return state.notes.filter((n) => {
-    const text = [n.title, n.body, n.formulas, n.source_text, n.source, ...(n.tags || [])].join(" ").toLowerCase();
+    const src = sourceOf(n);
+    const text = [n.title, n.body, n.formulas, src, ...(n.tags || [])].join(" ").toLowerCase();
     if (f.keyword && !text.includes(f.keyword.toLowerCase())) return false;
     if (f.chapter && n.chapter !== f.chapter) return false;
     if (f.tag && !(n.tags || []).includes(f.tag)) return false;
-    if (f.pending && !["待补充", "待完善", "待整理"].includes(statusOf(n))) return false;
+    if (f.source && src !== f.source) return false;
+    if (f.pending && !isPending(n)) return false;
     if (f.noBody && n.body) return false;
     if (f.noFormula && n.formulas) return false;
     if (f.noLinks && n.related_question_ids?.length) return false;
@@ -386,7 +438,16 @@ function attachmentHtml(type, id) {
   const items = byObject(type, id);
   if (!items.length) return "";
   return `<div class="image-grid">${items
-    .map((a) => `<img src="${a.public_url}" alt="${escapeHtml(a.file_name)}" data-zoom="${a.public_url}">`)
+    .map(
+      (a) => `<figure>
+        <img src="${a.public_url}" alt="${escapeHtml(a.file_name)}" data-zoom="${a.public_url}">
+        <figcaption>${escapeHtml(a.caption || a.file_name)}</figcaption>
+        <div class="image-actions">
+          <button class="ghost" data-copy-md="${escapeHtml(a.public_url)}">复制引用</button>
+          ${state.session ? `<button class="ghost danger" data-archive-attachment="${a.id}">归档</button>` : ""}
+        </div>
+      </figure>`
+    )
     .join("")}</div>`;
 }
 
@@ -406,6 +467,7 @@ function shell(content) {
         .map(([id, label]) => `<button class="${state.view === id ? "active" : ""}" data-view="${id}">${label}</button>`)
         .join("")}</nav>
       <button class="refresh" data-action="refresh">${state.busy ? "读取中..." : "刷新 Supabase 数据"}</button>
+      <button class="refresh" data-action="theme">${state.theme === "dark" ? "切到浅色" : state.theme === "light" ? "跟随系统" : "切到深色"}</button>
       ${!isConfigured && !localStorage.getItem(configKey) ? `<div class="config-warning">尚未配置 Supabase，当前显示本地 seed 预览。填写 <code>src/config.js</code> 后即可真实保存。</div>` : ""}
       ${state.loadError ? `<div class="config-warning">Supabase 已配置，但数据库表可能还没创建：${escapeHtml(state.loadError)}</div>` : ""}
     </aside>
@@ -414,7 +476,9 @@ function shell(content) {
 }
 
 function dashboard() {
-  const pending = [...state.questions, ...state.notes].filter((x) => ["待补充", "待完善", "待整理"].includes(statusOf(x)));
+  const pending = [...state.questions, ...state.notes].filter(isPending);
+  const noAnswer = state.questions.filter((q) => !q.answer && !q.final_answer).length;
+  const calcCount = state.questions.filter((q) => q.type === "计算题").length;
   const recent = [...state.questions, ...state.notes]
     .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))
     .slice(0, 8);
@@ -430,6 +494,8 @@ function dashboard() {
       <button data-view="questions"><b>${state.questions.length}</b><span>题目总数</span></button>
       <button data-view="notes"><b>${state.notes.length}</b><span>知识点总数</span></button>
       <button data-action="pending"><b>${pending.length}</b><span>待完善</span></button>
+      <button data-action="no-answer"><b>${noAnswer}</b><span>无答案题</span></button>
+      <button data-action="calc-only"><b>${calcCount}</b><span>计算题</span></button>
       <button data-view="analysis"><b>${state.sources.length || SOURCE_SEEDS.length}</b><span>资料来源</span></button>
     </section>
     <section class="quick">
@@ -463,11 +529,13 @@ function empty(text) {
 function filters(kind) {
   const items = kind === "questions" ? state.questions : state.notes;
   const tags = unique(items.map((x) => x.tags || []));
+  const sources = unique(items.map(sourceOf));
   return `
     <div class="filters">
       <input name="keyword" placeholder="关键词搜索" value="${escapeHtml(state.filters.keyword || "")}">
       <select name="chapter"><option value="">全部章节</option>${CHAPTERS.map((c) => `<option ${state.filters.chapter === c ? "selected" : ""}>${c}</option>`).join("")}</select>
       <select name="tag"><option value="">全部标签</option>${tags.map((t) => `<option ${state.filters.tag === t ? "selected" : ""}>${escapeHtml(t)}</option>`).join("")}</select>
+      <select name="source"><option value="">全部来源</option>${sources.map((s) => `<option value="${escapeHtml(s)}" ${state.filters.source === s ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}</select>
       ${kind === "questions" ? `<select name="type"><option value="">全部题型</option>${["名词解释", "简答题", "计算题"].map((t) => `<option ${state.filters.type === t ? "selected" : ""}>${t}</option>`).join("")}</select>` : ""}
       ${kind === "questions" ? `<select name="difficulty"><option value="">全部难度</option>${["基础", "中等", "困难"].map((d) => `<option ${state.filters.difficulty === d ? "selected" : ""}>${d}</option>`).join("")}</select>` : ""}
       <label><input type="checkbox" name="pending" ${state.filters.pending ? "checked" : ""}> 只看待完善</label>
@@ -488,15 +556,16 @@ function questionsView() {
 
 function questionRow(q) {
   return `<article class="row" data-detail="question:${q.id}">
-    <div><h3>${escapeHtml(q.title)}</h3><p>${escapeHtml(q.chapter || "")} · ${escapeHtml(q.type || "")} · ${escapeHtml(q.difficulty || "")}</p>${tagsHtml(q.tags)}</div>
+    <div><h3>${escapeHtml(q.title)}</h3><p>${escapeHtml(q.chapter || "")} · ${escapeHtml(q.type || "")} · ${escapeHtml(q.difficulty || "")} · ${escapeHtml(sourceOf(q))}</p>${tagsHtml(q.tags)}</div>
     <span class="status ${statusOf(q)}">${statusOf(q)}</span>
   </article>`;
 }
 
 function questionDetail(q) {
   const isCalc = q.type === "计算题";
+  const linkedNotes = state.notes.filter((n) => (n.related_question_ids || []).map(String).includes(String(q.id)));
   shell(`
-    <section class="topbar"><div><button class="ghost" data-view="questions">返回题库</button><h1>${escapeHtml(q.title)}</h1><p>${escapeHtml(q.chapter || "")} · ${escapeHtml(q.type || "")} · 来源：${escapeHtml(q.source_text || q.source || "")}</p></div><button data-edit-question="${q.id}">编辑/补充</button></section>
+    <section class="topbar"><div><button class="ghost" data-view="questions">返回题库</button><h1>${escapeHtml(q.title)}</h1><p>${escapeHtml(q.chapter || "")} · ${escapeHtml(q.type || "")} · 来源：${escapeHtml(sourceOf(q))}</p></div><button data-edit-question="${q.id}">编辑/补充</button></section>
     <section class="detail">
       <div class="meta">${tagsHtml(q.tags)} <span class="status ${statusOf(q)}">${statusOf(q)}</span></div>
       ${isCalc ? calcBlocks(q) : ""}
@@ -506,6 +575,7 @@ function questionDetail(q) {
       ${block("解析", q.analysis)}
       ${block("常见错误", q.common_mistakes)}
       ${attachmentHtml("question", q.id)}
+      <section class="block"><h2>关联知识点</h2>${linkedNotes.map(noteRow).join("") || empty("暂未关联知识点")}</section>
     </section>
   `);
 }
@@ -538,7 +608,7 @@ function notesView() {
 
 function noteRow(n) {
   return `<article class="row" data-detail="note:${n.id}">
-    <div><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.chapter || "")} · ${escapeHtml(n.source_text || n.source || "")}</p>${tagsHtml(n.tags)}</div>
+    <div><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.chapter || "")} · ${escapeHtml(sourceOf(n))}</p>${tagsHtml(n.tags)}</div>
     <span class="status ${statusOf(n)}">${statusOf(n)}</span>
   </article>`;
 }
@@ -546,7 +616,7 @@ function noteRow(n) {
 function noteDetail(n) {
   const linked = (n.related_question_ids || []).map((id) => state.questions.find((q) => String(q.id) === String(id))).filter(Boolean);
   shell(`
-    <section class="topbar"><div><button class="ghost" data-view="notes">返回知识库</button><h1>${escapeHtml(n.title)}</h1><p>${escapeHtml(n.chapter || "")} · 来源：${escapeHtml(n.source_text || n.source || "")}</p></div><button data-edit-note="${n.id}">编辑知识点</button></section>
+    <section class="topbar"><div><button class="ghost" data-view="notes">返回知识库</button><h1>${escapeHtml(n.title)}</h1><p>${escapeHtml(n.chapter || "")} · 来源：${escapeHtml(sourceOf(n))}</p></div><button data-edit-note="${n.id}">编辑知识点</button></section>
     <section class="detail">
       <div class="meta">${tagsHtml(n.tags)} <span class="status ${statusOf(n)}">${statusOf(n)}</span></div>
       ${block("正文", n.body || "这个知识点还没有正文，欢迎补充。")}
@@ -650,6 +720,7 @@ function settingsView() {
   shell(`
     <section class="topbar"><div><h1>登录与个人信息</h1><p>未登录可以浏览；登录后可以新增、编辑和上传图片。</p></div></section>
     ${!isConfigured ? `<section class="block warn"><h2>Supabase 未配置</h2><p>填写 <code>src/config.js</code> 中的 <code>SUPABASE_URL</code> 和 <code>SUPABASE_ANON_KEY</code> 后启用真实数据库。</p></section>` : ""}
+    ${isConfigured ? `<section class="block"><h2>Supabase 状态</h2><p>项目已连接：<code>${escapeHtml(new URL(SUPABASE_URL).host)}</code></p><p>如果页面提示数据库表不存在，请在 Supabase SQL Editor 运行仓库里的 <code>supabase/schema.sql</code>。运行后回到这里点击“刷新 Supabase 数据”。</p></section>` : ""}
     ${state.session ? `
       <form class="editor" data-form="profile">
         <p>当前登录：${escapeHtml(state.session.user.email)}</p>
@@ -692,6 +763,20 @@ document.addEventListener("click", async (event) => {
     state.filters.pending = true;
     setView("questions");
   }
+  if (target.dataset.action === "no-answer") {
+    state.filters.noAnswer = true;
+    setView("questions");
+  }
+  if (target.dataset.action === "calc-only") {
+    state.filters.calcOnly = true;
+    setView("questions");
+  }
+  if (target.dataset.action === "theme") {
+    state.theme = state.theme === "auto" ? "dark" : state.theme === "dark" ? "light" : "auto";
+    localStorage.setItem(themeKey, state.theme);
+    applyTheme();
+    render();
+  }
   if (target.dataset.detail) {
     const [type, id] = target.dataset.detail.split(":");
     const item = type === "question" ? state.questions.find((q) => String(q.id) === id) : state.notes.find((n) => String(n.id) === id);
@@ -730,6 +815,12 @@ document.addEventListener("click", async (event) => {
   }
   if (target.dataset.action === "logout") await logout();
   if (target.dataset.action === "import-seed") await importSeedData();
+  if (target.dataset.archiveAttachment) await archiveAttachment(target.dataset.archiveAttachment);
+  if (target.dataset.copyMd) {
+    const markdown = `![图片](${target.dataset.copyMd})`;
+    await navigator.clipboard.writeText(markdown);
+    showToast("已复制图片 Markdown 引用");
+  }
   if (target.dataset.zoom) {
     const box = $("#lightbox");
     box.innerHTML = `<button aria-label="关闭">×</button><img src="${target.dataset.zoom}" alt="">`;
