@@ -1,0 +1,21 @@
+# Course source materials are local-only and not needed for the deployed app.
+ppt/
+ppt wwp/
+作业/
+期中资料/
+期末/
+
+# Local extraction/debug artifacts.
+analysis_extract.json
+server.out.log
+server.err.log
+半导体集成电路_知识体系_第5-8章.html
+
+# Dependencies and build artifacts.
+node_modules/
+dist/
+.vercel/
+
+# OS/editor noise.
+.DS_Store
+Thumbs.db
