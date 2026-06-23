@@ -15,6 +15,7 @@ const state = {
   studyIndex: 0,
   studyReveal: false,
   busy: false,
+  loadError: "",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -117,6 +118,7 @@ async function loadAll() {
       state.notes = NOTE_SEEDS.map((n, i) => ({ id: `seed-n-${i}`, status: "待整理", ...n }));
       state.attachments = [];
       state.profile = null;
+      state.loadError = "";
       return;
     }
 
@@ -136,12 +138,18 @@ async function loadAll() {
     state.attachments = attachments.data || [];
     state.sources = sources.data || [];
     state.profile = profile.data;
+    state.loadError = "";
     if (!state.sources.length && state.questions.length === 0 && state.notes.length === 0) {
       state.sources = SOURCE_SEEDS;
       state.questions = QUESTION_SEEDS.map((q, i) => ({ id: `seed-q-${i}`, status: "待补充", ...q }));
       state.notes = NOTE_SEEDS.map((n, i) => ({ id: `seed-n-${i}`, status: "待整理", ...n }));
     }
   } catch (error) {
+    state.loadError = error.message;
+    state.sources = SOURCE_SEEDS;
+    state.questions = QUESTION_SEEDS.map((q, i) => ({ id: `seed-q-${i}`, status: "待补充", ...q }));
+    state.notes = NOTE_SEEDS.map((n, i) => ({ id: `seed-n-${i}`, status: "待整理", ...n }));
+    state.attachments = [];
     showToast(error.message, "bad");
   } finally {
     state.busy = false;
@@ -399,6 +407,7 @@ function shell(content) {
         .join("")}</nav>
       <button class="refresh" data-action="refresh">${state.busy ? "读取中..." : "刷新 Supabase 数据"}</button>
       ${!isConfigured && !localStorage.getItem(configKey) ? `<div class="config-warning">尚未配置 Supabase，当前显示本地 seed 预览。填写 <code>src/config.js</code> 后即可真实保存。</div>` : ""}
+      ${state.loadError ? `<div class="config-warning">Supabase 已配置，但数据库表可能还没创建：${escapeHtml(state.loadError)}</div>` : ""}
     </aside>
     <main class="main">${content}</main>
   `;
