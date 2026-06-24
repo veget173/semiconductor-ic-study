@@ -313,43 +313,4 @@ export const QUESTION_SEEDS = [
   },
 ];
 
-export const NOTE_SEEDS = [
-  {
-    title: "CMOS 闩锁效应",
-    chapter: "互连与寄生参数",
-    tags: ["CMOS", "寄生效应"],
-    body: "CMOS 工艺中的寄生 PNP/NPN 结构可能形成 PNPN 通路，在扰动或过压条件下进入低阻导通状态。复习时重点整理触发条件、版图抑制措施、保护环和衬底/阱接触。",
-    source: "ppt wwp/08-1-半导体集成电路-CMOS的寄生效应及抑制措施.pptx",
-  },
-  {
-    title: "CMOS 反相器复习框架",
-    chapter: "CMOS 反相器",
-    tags: ["CMOS", "反相器", "噪声容限"],
-    body: "围绕电压传输特性、工作区组合、开关阈值、噪声容限、动态功耗和传播延迟整理。重点比较单沟道 MOS 反相器、E/E、E/D、自举负载与 CMOS 反相器。",
-    source: "ppt wwp/17-1-半导体集成电路-CMOS反相器1.pptx",
-    formulas: "$$NM_H=V_{OH}-V_{IH},\\quad NM_L=V_{IL}-V_{OL}$$",
-  },
-  {
-    title: "SRAM 读写操作",
-    chapter: "存储器基础",
-    tags: ["SRAM", "噪声容限"],
-    body: "6T SRAM 由交叉耦合反相器和访问管构成。读操作关注读稳定性，写操作关注写能力。适合关联读噪声容限、写噪声容限和辅助电路。",
-    source: "作业/第四章作业.docx",
-  },
-  {
-    title: "差动放大器与 CMRR",
-    chapter: "模拟集成电路基础",
-    tags: ["差动放大器", "CMRR", "失调"],
-    body: "差动放大器放大差模信号并抑制共模信号。复习时将大信号电流分配、小信号差模增益、共模增益、失调来源和有源负载联系起来。",
-    source: "作业/第五章作业.docx",
-    formulas: "$$CMRR=\\left|\\frac{A_d}{A_{cm}}\\right|$$",
-  },
-  {
-    title: "带隙基准核心公式",
-    chapter: "模拟集成电路基础",
-    tags: ["带隙基准", "PTAT", "CTAT"],
-    body: "带隙基准通过 CTAT 的 $V_{BE}$ 与 PTAT 的 $\\Delta V_{BE}$ 加权相加，抵消一阶温度系数，输出约接近硅带隙外推值。",
-    source: "作业/第六章作业答案_codex.docx",
-    formulas: "$$\\Delta V_{BE}=V_T\\ln n,\\quad V_{ref}=V_{BE}+K V_T\\ln n$$",
-  },
-];
+export const NOTE_SEEDS = [];

@@ -27,6 +27,7 @@ const app = $("#app");
 const localKey = "ic-study-progress";
 const configKey = "ic-study-config-hint-hidden";
 const themeKey = "ic-study-theme";
+let mathRetryCount = 0;
 
 function applyTheme() {
   document.documentElement.dataset.theme = state.theme;
@@ -45,20 +46,28 @@ function md(value = "") {
   const escaped = escapeHtml(value);
   return escaped
     .replace(/!\[(.*?)\]\((.*?)\)/g, '<img class="inline-image" alt="$1" src="$2" data-zoom="$2">')
-    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\n/g, "<br>");
+    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
 }
 
 function renderMath() {
-  if (window.renderMathInElement) {
-    window.renderMathInElement(document.body, {
-      delimiters: [
-        { left: "$$", right: "$$", display: true },
-        { left: "$", right: "$", display: false },
-      ],
-      throwOnError: false,
-    });
+  if (!window.renderMathInElement) {
+    if (mathRetryCount < 20) {
+      mathRetryCount += 1;
+      window.setTimeout(renderMath, 150);
+    }
+    return;
   }
+  mathRetryCount = 0;
+  window.renderMathInElement(app, {
+    delimiters: [
+      { left: "$$", right: "$$", display: true },
+      { left: "\\[", right: "\\]", display: true },
+      { left: "$", right: "$", display: false },
+      { left: "\\(", right: "\\)", display: false },
+    ],
+    throwOnError: false,
+    processEscapes: true,
+  });
 }
 
 function progress() {
@@ -115,6 +124,14 @@ function isBlockedSource(item) {
 
 function visibleSources(items) {
   return items.filter((item) => !isBlockedSource(item));
+}
+
+function noteHasLinkedQuestion(note) {
+  return Array.isArray(note.related_question_ids) && note.related_question_ids.length > 0;
+}
+
+function visibleNotes(items) {
+  return items.filter(noteHasLinkedQuestion);
 }
 
 function normalizeChapter(chapter = "", item = {}) {
@@ -176,7 +193,7 @@ async function loadAll() {
     if (!isConfigured) {
       state.sources = visibleSources(SOURCE_SEEDS);
       state.questions = visibleSources(QUESTION_SEEDS).map((q, i) => ({ id: `seed-q-${i}`, status: "待补充", ...q }));
-      state.notes = NOTE_SEEDS.map((n, i) => ({ id: `seed-n-${i}`, status: "待整理", ...n }));
+      state.notes = [];
       state.attachments = [];
       state.answerSubmissions = [];
       state.profiles = [];
@@ -200,7 +217,7 @@ async function loadAll() {
     const submissions = await supabase.from("answer_submissions").select("*").eq("archived", false).order("created_at", { ascending: false });
     state.answerSubmissions = submissions.error ? [] : submissions.data || [];
     state.questions = visibleSources(questions.data || []);
-    state.notes = notes.data || [];
+    state.notes = visibleNotes(notes.data || []);
     state.attachments = attachments.data || [];
     state.sources = visibleSources(sources.data || []);
     state.profile = profile.data;
@@ -209,13 +226,13 @@ async function loadAll() {
     if (!state.sources.length && state.questions.length === 0 && state.notes.length === 0) {
       state.sources = SOURCE_SEEDS;
       state.questions = visibleSources(QUESTION_SEEDS).map((q, i) => ({ id: `seed-q-${i}`, status: "待补充", ...q }));
-      state.notes = NOTE_SEEDS.map((n, i) => ({ id: `seed-n-${i}`, status: "待整理", ...n }));
+      state.notes = [];
     }
   } catch (error) {
     state.loadError = error.message;
     state.sources = visibleSources(SOURCE_SEEDS);
     state.questions = visibleSources(QUESTION_SEEDS).map((q, i) => ({ id: `seed-q-${i}`, status: "待补充", ...q }));
-    state.notes = NOTE_SEEDS.map((n, i) => ({ id: `seed-n-${i}`, status: "待整理", ...n }));
+    state.notes = [];
     state.attachments = [];
     state.answerSubmissions = [];
     state.profiles = [];

@@ -303,6 +303,13 @@ label input[type="checkbox"] {
 .detail .block, .block {
   box-shadow: none;
 }
+.block div {
+  white-space: pre-wrap;
+}
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
 .answer-history {
   display: grid;
   gap: 12px;
