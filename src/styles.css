@@ -189,9 +189,9 @@ section, .study-card, .editor {
 }
 .filters {
   display: grid;
-  grid-template-columns: repeat(5, minmax(130px, 1fr));
-  gap: 10px;
-  align-items: center;
+  grid-template-columns: minmax(180px, 1.1fr) minmax(260px, 1.4fr) minmax(150px, 0.8fr) minmax(220px, 1.2fr) minmax(130px, 0.7fr);
+  gap: 12px;
+  align-items: start;
   margin-bottom: 14px;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -206,6 +206,22 @@ input, textarea, select {
   border-radius: 6px;
   padding: 9px 10px;
 }
+.filters input,
+.filters select {
+  min-height: 42px;
+}
+.filter-main,
+.filter-wide {
+  min-width: 0;
+}
+.filter-checks {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  align-items: center;
+  padding-top: 2px;
+}
 label {
   display: grid;
   gap: 6px;
@@ -213,6 +229,21 @@ label {
 }
 label input[type="checkbox"] {
   width: auto;
+}
+.check {
+  display: inline-flex;
+  grid-template-columns: none;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
 }
 .table-list {
   display: grid;
@@ -251,11 +282,12 @@ label input[type="checkbox"] {
   background: rgba(166, 95, 0, 0.12);
   color: var(--warn);
 }
-.grid-4 {
+.grid-4, .grid-3 {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .editor {
   display: grid;
   gap: 14px;

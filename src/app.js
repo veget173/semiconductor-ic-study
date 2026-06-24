@@ -105,6 +105,22 @@ function sourceOf(item) {
   return item.source_text || item.source || item.path || "";
 }
 
+function normalizeChapter(chapter = "", item = {}) {
+  const text = [chapter, item.title, sourceOf(item), ...(item.tags || [])].join(" ");
+  if (/第八章|开关电容/.test(text)) return CHAPTERS[7];
+  if (/第七章|运算放大器|运放|频率补偿/.test(text)) return CHAPTERS[6];
+  if (/第六章|基准|带隙|恒流源|电流镜|有源负载|PTAT|CTAT/.test(text)) return CHAPTERS[5];
+  if (/第五章|小信号|差动|共源|共栅|共漏|厄利|输出阻抗|跨导|失调|CMRR/.test(text)) return CHAPTERS[4];
+  if (/第四章|时序|动态|锁存器|触发器|SRAM|存储器/.test(text)) return CHAPTERS[3];
+  if (/第三章|MOS 逻辑|CMOS|反相器|传输门|组合逻辑|延迟|功耗|噪声容限|棒状图/.test(text)) return CHAPTERS[2];
+  if (/第二章|TTL|双极型逻辑|扇出|ECL|I2L/.test(text)) return CHAPTERS[1];
+  return CHAPTERS[0];
+}
+
+function chapterOf(item) {
+  return normalizeChapter(item.chapter, item);
+}
+
 function isPending(item) {
   return ["待补充", "待完善", "待整理"].includes(statusOf(item));
 }
@@ -236,7 +252,6 @@ async function saveQuestion(form) {
     type: form.type.value,
     chapter: form.chapter.value,
     tags: parseTags(form.tags.value),
-    difficulty: form.difficulty.value,
     answer: form.answer.value.trim(),
     analysis: form.analysis.value.trim(),
     related_formulas: form.related_formulas.value.trim(),
@@ -330,7 +345,7 @@ async function archiveAttachment(id) {
 }
 
 async function importSeedData() {
-  if (!state.session || !isConfigured) return showToast("登录并配置 Supabase 后才能导入", "bad");
+  if (!state.session || !isConfigured) return showToast("登录后才能把内置资料同步到 Supabase", "bad");
   const existingQuestionTitles = new Set(state.questions.map((q) => q.title));
   const existingNoteTitles = new Set(state.notes.map((n) => n.title));
   const existingSourceTitles = new Set(state.sources.map((s) => s.title));
@@ -346,22 +361,23 @@ async function importSeedData() {
   const questions = QUESTION_SEEDS.filter((q) => !existingQuestionTitles.has(q.title)).map((q) => ({
     title: q.title,
     type: q.type,
-    chapter: q.chapter,
+    chapter: normalizeChapter(q.chapter, q),
     tags: q.tags || [],
-    difficulty: q.difficulty || "中等",
     related_formulas: q.related_formulas || "",
     source_text: q.source,
-    status: "待补充",
+    status: q.status || "待补充",
     known_conditions: q.known_conditions || "",
     solve_goal: q.solve_goal || "",
     used_formulas: q.used_formulas || "",
+    answer: q.answer || "",
+    analysis: q.analysis || "",
     created_by: userId,
     updated_by: userId,
   }));
   const notes = NOTE_SEEDS.filter((n) => !existingNoteTitles.has(n.title)).map((n) => ({
     title: n.title,
     body: n.body,
-    chapter: n.chapter,
+    chapter: normalizeChapter(n.chapter, n),
     tags: n.tags || [],
     formulas: n.formulas || "",
     source_text: n.source,
@@ -379,7 +395,7 @@ async function importSeedData() {
     const { error } = await supabase.from(table).insert(rows);
     if (error) return showToast(error.message, "bad");
   }
-  showToast(`已导入 ${sources.length} 个来源、${questions.length} 道题、${notes.length} 个知识点`);
+  showToast(`已同步 ${sources.length} 个来源、${questions.length} 道题、${notes.length} 个知识点`);
   await loadAll();
 }
 
@@ -400,9 +416,8 @@ function filteredQuestions() {
     const src = sourceOf(q);
     const text = [q.title, q.answer, q.analysis, src, ...(q.tags || [])].join(" ").toLowerCase();
     if (f.keyword && !text.includes(f.keyword.toLowerCase())) return false;
-    if (f.chapter && q.chapter !== f.chapter) return false;
+    if (f.chapter && chapterOf(q) !== f.chapter) return false;
     if (f.type && q.type !== f.type) return false;
-    if (f.difficulty && q.difficulty !== f.difficulty) return false;
     if (f.tag && !(q.tags || []).includes(f.tag)) return false;
     if (f.source && src !== f.source) return false;
     if (f.pending && !isPending(q)) return false;
@@ -419,7 +434,7 @@ function filteredNotes() {
     const src = sourceOf(n);
     const text = [n.title, n.body, n.formulas, src, ...(n.tags || [])].join(" ").toLowerCase();
     if (f.keyword && !text.includes(f.keyword.toLowerCase())) return false;
-    if (f.chapter && n.chapter !== f.chapter) return false;
+    if (f.chapter && chapterOf(n) !== f.chapter) return false;
     if (f.tag && !(n.tags || []).includes(f.tag)) return false;
     if (f.source && src !== f.source) return false;
     if (f.pending && !isPending(n)) return false;
@@ -517,7 +532,7 @@ function dashboard() {
     </div>
     <section>
       <h2>最近更新</h2>
-      <div class="timeline">${recent.map((x) => `<button data-detail="${x.type ? "question" : "note"}:${x.id}"><b>${escapeHtml(x.title)}</b><span>${escapeHtml(x.chapter || "")} · ${statusOf(x)}</span></button>`).join("") || empty("暂无更新")}</div>
+      <div class="timeline">${recent.map((x) => `<button data-detail="${x.type ? "question" : "note"}:${x.id}"><b>${escapeHtml(x.title)}</b><span>${escapeHtml(chapterOf(x))} · ${statusOf(x)}</span></button>`).join("") || empty("暂无更新")}</div>
     </section>
   `);
 }
@@ -532,15 +547,16 @@ function filters(kind) {
   const sources = unique(items.map(sourceOf));
   return `
     <div class="filters">
-      <input name="keyword" placeholder="关键词搜索" value="${escapeHtml(state.filters.keyword || "")}">
-      <select name="chapter"><option value="">全部章节</option>${CHAPTERS.map((c) => `<option ${state.filters.chapter === c ? "selected" : ""}>${c}</option>`).join("")}</select>
+      <input class="filter-main" name="keyword" placeholder="关键词搜索" value="${escapeHtml(state.filters.keyword || "")}">
+      <select class="filter-wide" name="chapter"><option value="">全部章节</option>${CHAPTERS.map((c) => `<option ${state.filters.chapter === c ? "selected" : ""}>${c}</option>`).join("")}</select>
       <select name="tag"><option value="">全部标签</option>${tags.map((t) => `<option ${state.filters.tag === t ? "selected" : ""}>${escapeHtml(t)}</option>`).join("")}</select>
-      <select name="source"><option value="">全部来源</option>${sources.map((s) => `<option value="${escapeHtml(s)}" ${state.filters.source === s ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}</select>
+      <select class="filter-wide" name="source"><option value="">全部来源</option>${sources.map((s) => `<option value="${escapeHtml(s)}" ${state.filters.source === s ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}</select>
       ${kind === "questions" ? `<select name="type"><option value="">全部题型</option>${["名词解释", "简答题", "计算题"].map((t) => `<option ${state.filters.type === t ? "selected" : ""}>${t}</option>`).join("")}</select>` : ""}
-      ${kind === "questions" ? `<select name="difficulty"><option value="">全部难度</option>${["基础", "中等", "困难"].map((d) => `<option ${state.filters.difficulty === d ? "selected" : ""}>${d}</option>`).join("")}</select>` : ""}
-      <label><input type="checkbox" name="pending" ${state.filters.pending ? "checked" : ""}> 只看待完善</label>
-      ${kind === "questions" ? `<label><input type="checkbox" name="noAnswer" ${state.filters.noAnswer ? "checked" : ""}> 无答案</label><label><input type="checkbox" name="noAnalysis" ${state.filters.noAnalysis ? "checked" : ""}> 无解析</label><label><input type="checkbox" name="calcOnly" ${state.filters.calcOnly ? "checked" : ""}> 计算题</label>` : ""}
-      ${kind === "notes" ? `<label><input type="checkbox" name="noBody" ${state.filters.noBody ? "checked" : ""}> 无正文</label><label><input type="checkbox" name="noFormula" ${state.filters.noFormula ? "checked" : ""}> 无公式</label><label><input type="checkbox" name="noLinks" ${state.filters.noLinks ? "checked" : ""}> 无关联题</label>` : ""}
+      <div class="filter-checks">
+        <label class="check"><input type="checkbox" name="pending" ${state.filters.pending ? "checked" : ""}> <span>只看待完善</span></label>
+        ${kind === "questions" ? `<label class="check"><input type="checkbox" name="noAnswer" ${state.filters.noAnswer ? "checked" : ""}> <span>无答案</span></label><label class="check"><input type="checkbox" name="noAnalysis" ${state.filters.noAnalysis ? "checked" : ""}> <span>无解析</span></label><label class="check"><input type="checkbox" name="calcOnly" ${state.filters.calcOnly ? "checked" : ""}> <span>计算题</span></label>` : ""}
+        ${kind === "notes" ? `<label class="check"><input type="checkbox" name="noBody" ${state.filters.noBody ? "checked" : ""}> <span>无正文</span></label><label class="check"><input type="checkbox" name="noFormula" ${state.filters.noFormula ? "checked" : ""}> <span>无公式</span></label><label class="check"><input type="checkbox" name="noLinks" ${state.filters.noLinks ? "checked" : ""}> <span>无关联题</span></label>` : ""}
+      </div>
     </div>
   `;
 }
@@ -556,7 +572,7 @@ function questionsView() {
 
 function questionRow(q) {
   return `<article class="row" data-detail="question:${q.id}">
-    <div><h3>${escapeHtml(q.title)}</h3><p>${escapeHtml(q.chapter || "")} · ${escapeHtml(q.type || "")} · ${escapeHtml(q.difficulty || "")} · ${escapeHtml(sourceOf(q))}</p>${tagsHtml(q.tags)}</div>
+    <div><h3>${escapeHtml(q.title)}</h3><p>${escapeHtml(chapterOf(q))} · ${escapeHtml(q.type || "")} · ${escapeHtml(sourceOf(q))}</p>${tagsHtml(q.tags)}</div>
     <span class="status ${statusOf(q)}">${statusOf(q)}</span>
   </article>`;
 }
@@ -565,7 +581,7 @@ function questionDetail(q) {
   const isCalc = q.type === "计算题";
   const linkedNotes = state.notes.filter((n) => (n.related_question_ids || []).map(String).includes(String(q.id)));
   shell(`
-    <section class="topbar"><div><button class="ghost" data-view="questions">返回题库</button><h1>${escapeHtml(q.title)}</h1><p>${escapeHtml(q.chapter || "")} · ${escapeHtml(q.type || "")} · 来源：${escapeHtml(sourceOf(q))}</p></div><button data-edit-question="${q.id}">编辑/补充</button></section>
+    <section class="topbar"><div><button class="ghost" data-view="questions">返回题库</button><h1>${escapeHtml(q.title)}</h1><p>${escapeHtml(chapterOf(q))} · ${escapeHtml(q.type || "")} · 来源：${escapeHtml(sourceOf(q))}</p></div><button data-edit-question="${q.id}">编辑/补充</button></section>
     <section class="detail">
       <div class="meta">${tagsHtml(q.tags)} <span class="status ${statusOf(q)}">${statusOf(q)}</span></div>
       ${isCalc ? calcBlocks(q) : ""}
@@ -608,7 +624,7 @@ function notesView() {
 
 function noteRow(n) {
   return `<article class="row" data-detail="note:${n.id}">
-    <div><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.chapter || "")} · ${escapeHtml(sourceOf(n))}</p>${tagsHtml(n.tags)}</div>
+    <div><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(chapterOf(n))} · ${escapeHtml(sourceOf(n))}</p>${tagsHtml(n.tags)}</div>
     <span class="status ${statusOf(n)}">${statusOf(n)}</span>
   </article>`;
 }
@@ -616,7 +632,7 @@ function noteRow(n) {
 function noteDetail(n) {
   const linked = (n.related_question_ids || []).map((id) => state.questions.find((q) => String(q.id) === String(id))).filter(Boolean);
   shell(`
-    <section class="topbar"><div><button class="ghost" data-view="notes">返回知识库</button><h1>${escapeHtml(n.title)}</h1><p>${escapeHtml(n.chapter || "")} · 来源：${escapeHtml(sourceOf(n))}</p></div><button data-edit-note="${n.id}">编辑知识点</button></section>
+    <section class="topbar"><div><button class="ghost" data-view="notes">返回知识库</button><h1>${escapeHtml(n.title)}</h1><p>${escapeHtml(chapterOf(n))} · 来源：${escapeHtml(sourceOf(n))}</p></div><button data-edit-note="${n.id}">编辑知识点</button></section>
     <section class="detail">
       <div class="meta">${tagsHtml(n.tags)} <span class="status ${statusOf(n)}">${statusOf(n)}</span></div>
       ${block("正文", n.body || "这个知识点还没有正文，欢迎补充。")}
@@ -633,7 +649,7 @@ function questionForm(q = {}) {
     <form class="editor" data-form="question">
       <input type="hidden" name="id" value="${q.id && !String(q.id).startsWith("seed-") ? q.id : ""}">
       ${input("题目", "title", q.title, "textarea")}
-      <div class="grid-4">${select("题型", "type", ["名词解释", "简答题", "计算题"], q.type)}${select("章节", "chapter", CHAPTERS, q.chapter)}${select("难度", "difficulty", ["基础", "中等", "困难"], q.difficulty)}${select("完善状态", "status", ["待补充", "待完善", "待整理", "已整理"], statusOf(q))}</div>
+      <div class="grid-3">${select("题型", "type", ["名词解释", "简答题", "计算题"], q.type)}${select("章节", "chapter", CHAPTERS, chapterOf(q))}${select("完善状态", "status", ["待补充", "待完善", "待整理", "已整理"], statusOf(q))}</div>
       ${input("标签", "tags", (q.tags || []).join(", "))}
       ${input("来源", "source_text", q.source_text || q.source)}
       <div class="calc-editor">
@@ -659,7 +675,7 @@ function noteForm(n = {}) {
     <form class="editor" data-form="note">
       <input type="hidden" name="id" value="${n.id && !String(n.id).startsWith("seed-") ? n.id : ""}">
       ${input("标题", "title", n.title)}
-      <div class="grid-4">${select("章节", "chapter", CHAPTERS, n.chapter)}${select("完善状态", "status", ["待补充", "待完善", "待整理", "已整理"], statusOf(n))}</div>
+      <div class="grid-3">${select("章节", "chapter", CHAPTERS, chapterOf(n))}${select("完善状态", "status", ["待补充", "待完善", "待整理", "已整理"], statusOf(n))}</div>
       ${input("标签", "tags", (n.tags || []).join(", "))}
       ${input("来源", "source_text", n.source_text || n.source)}
       ${input("正文", "body", n.body, "textarea")}
@@ -688,7 +704,7 @@ function studyView() {
     ${filters("questions")}
     <div class="study-tools"><label><input type="checkbox" name="favOnly" ${state.filters.favOnly ? "checked" : ""}> 只刷收藏题</label></div>
     ${q ? `<section class="study-card">
-      <div class="meta">${escapeHtml(q.chapter || "")} · ${escapeHtml(q.type || "")} · ${tagsHtml(q.tags)}</div>
+      <div class="meta">${escapeHtml(chapterOf(q))} · ${escapeHtml(q.type || "")} · ${tagsHtml(q.tags)}</div>
       <h2>${escapeHtml(q.title)}</h2>
       ${state.studyReveal ? `${block("答案", q.answer || q.final_answer || "这题还没有答案，欢迎补充。")}${block("解析", q.analysis)}${block("公式", q.related_formulas || q.used_formulas)}${attachmentHtml("question", q.id)}` : ""}
       <div class="actions">
@@ -705,13 +721,13 @@ function studyView() {
 
 function analysisView() {
   shell(`
-    <section class="topbar"><div><h1>资料识别结果</h1><p>${ANALYSIS_SUMMARY.files}</p></div><button data-action="import-seed">导入初始题库/知识库</button></section>
+    <section class="topbar"><div><h1>资料识别结果</h1><p>${ANALYSIS_SUMMARY.files}</p><p>这些初始题库和知识库已经由当前项目文件夹里的 PPT、作业和资料抽取后内置到网站中；“同步”只是把内置资料写入 Supabase，方便大家刷新后共享编辑。</p></div><button data-action="import-seed">同步内置资料到数据库</button></section>
     <div class="split">
       <section><h2>识别章节</h2>${ANALYSIS_SUMMARY.chapters.map((x) => `<p>${escapeHtml(x)}</p>`).join("")}</section>
       <section><h2>题型</h2>${ANALYSIS_SUMMARY.questionTypes.map((x) => `<span class="tag">${x}</span>`).join("")}<h2>公式候选</h2>${ANALYSIS_SUMMARY.formulas.map((x) => `<div class="formula">${x}</div>`).join("")}</section>
     </div>
-    <section><h2>可导入题目候选</h2>${QUESTION_SEEDS.map((q) => `<p><b>${escapeHtml(q.type)}</b> · ${escapeHtml(q.chapter)} · ${escapeHtml(q.title)} <span class="muted">${escapeHtml(q.source)}</span></p>`).join("")}</section>
-    <section><h2>可导入知识点</h2>${NOTE_SEEDS.map((n) => `<p><b>${escapeHtml(n.chapter)}</b> · ${escapeHtml(n.title)} <span class="muted">${escapeHtml(n.source)}</span></p>`).join("")}</section>
+    <section><h2>内置题目候选</h2>${QUESTION_SEEDS.map((q) => `<p><b>${escapeHtml(q.type)}</b> · ${escapeHtml(normalizeChapter(q.chapter, q))} · ${escapeHtml(q.title)} <span class="muted">${escapeHtml(q.source)}</span></p>`).join("")}</section>
+    <section><h2>内置知识点</h2>${NOTE_SEEDS.map((n) => `<p><b>${escapeHtml(normalizeChapter(n.chapter, n))}</b> · ${escapeHtml(n.title)} <span class="muted">${escapeHtml(n.source)}</span></p>`).join("")}</section>
     <section><h2>未能完整解析</h2>${ANALYSIS_SUMMARY.incomplete.map((x) => `<p>${escapeHtml(x)}</p>`).join("")}</section>
   `);
 }
