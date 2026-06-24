@@ -69,6 +69,21 @@ create table if not exists public.knowledge_notes (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.answer_submissions (
+  id uuid primary key default gen_random_uuid(),
+  question_id uuid not null references public.questions(id),
+  answer text,
+  analysis text,
+  related_formulas text,
+  relation_type text not null default 'initial' check (relation_type in ('initial','correction','supplement')),
+  note text,
+  archived boolean not null default false,
+  created_by uuid references auth.users(id),
+  updated_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.tags (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
@@ -206,7 +221,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['profiles','sources','questions','knowledge_notes','tags','attachments']
+  foreach t in array array['profiles','sources','questions','knowledge_notes','answer_submissions','tags','attachments']
   loop
     execute format('drop trigger if exists touch_%I on public.%I', t, t);
     execute format('create trigger touch_%I before update on public.%I for each row execute function public.touch_updated_at()', t, t);
@@ -219,11 +234,14 @@ drop trigger if exists log_notes on public.knowledge_notes;
 create trigger log_notes after insert or update on public.knowledge_notes for each row execute function public.log_edit();
 drop trigger if exists log_attachments on public.attachments;
 create trigger log_attachments after insert or update on public.attachments for each row execute function public.log_edit();
+drop trigger if exists log_answer_submissions on public.answer_submissions;
+create trigger log_answer_submissions after insert or update on public.answer_submissions for each row execute function public.log_edit();
 
 alter table public.profiles enable row level security;
 alter table public.sources enable row level security;
 alter table public.questions enable row level security;
 alter table public.knowledge_notes enable row level security;
+alter table public.answer_submissions enable row level security;
 alter table public.tags enable row level security;
 alter table public.question_tags enable row level security;
 alter table public.note_tags enable row level security;
@@ -249,6 +267,10 @@ create policy "questions update authenticated" on public.questions for update to
 create policy "notes readable" on public.knowledge_notes for select using (true);
 create policy "notes insert authenticated" on public.knowledge_notes for insert to authenticated with check (true);
 create policy "notes update authenticated" on public.knowledge_notes for update to authenticated using (true) with check (true);
+
+create policy "answer_submissions readable" on public.answer_submissions for select using (true);
+create policy "answer_submissions insert authenticated" on public.answer_submissions for insert to authenticated with check (true);
+create policy "answer_submissions update authenticated" on public.answer_submissions for update to authenticated using (true) with check (true);
 
 create policy "tags readable" on public.tags for select using (true);
 create policy "tags insert authenticated" on public.tags for insert to authenticated with check (true);

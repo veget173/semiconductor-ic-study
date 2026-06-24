@@ -300,6 +300,15 @@ label input[type="checkbox"] {
   border-radius: 8px;
   padding: 12px;
 }
+.answer-submit-box {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1.3fr);
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--bg);
+}
 .actions {
   display: flex;
   gap: 10px;
@@ -308,6 +317,40 @@ label input[type="checkbox"] {
 }
 .detail .block, .block {
   box-shadow: none;
+}
+.answer-history {
+  display: grid;
+  gap: 12px;
+}
+.answer-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--bg);
+}
+.answer-card header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.answer-card small {
+  display: block;
+  color: var(--muted);
+}
+.avatar {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
+}
+.answer-note {
+  border-left: 3px solid var(--accent);
+  padding-left: 10px;
+  color: var(--ink);
 }
 .calc-grid {
   display: grid;
@@ -438,7 +481,7 @@ code {
   }
   .main { margin-left: 0; padding: 16px; }
   nav { grid-template-columns: repeat(3, 1fr); }
-  .metrics, .split, .calc-grid, .calc-editor, .grid-4, .filters {
+  .metrics, .split, .calc-grid, .calc-editor, .answer-submit-box, .grid-4, .grid-3, .filters {
     grid-template-columns: 1fr;
   }
   .topbar { flex-direction: column; }

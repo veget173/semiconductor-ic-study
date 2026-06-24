@@ -10,6 +10,8 @@ const state = {
   notes: [],
   attachments: [],
   sources: [],
+  answerSubmissions: [],
+  profiles: [],
   filters: {},
   selected: null,
   studyIndex: 0,
@@ -105,6 +107,15 @@ function sourceOf(item) {
   return item.source_text || item.source || item.path || "";
 }
 
+function isBlockedSource(item) {
+  const text = [item.title, sourceOf(item), ...(item.tags || [])].join(" ");
+  return /2025/.test(text);
+}
+
+function visibleSources(items) {
+  return items.filter((item) => !isBlockedSource(item));
+}
+
 function normalizeChapter(chapter = "", item = {}) {
   const text = [chapter, item.title, sourceOf(item), ...(item.tags || [])].join(" ");
   if (/第八章|开关电容/.test(text)) return CHAPTERS[7];
@@ -123,6 +134,10 @@ function chapterOf(item) {
 
 function isPending(item) {
   return ["待补充", "待完善", "待整理"].includes(statusOf(item));
+}
+
+function profileFor(userId) {
+  return state.profiles.find((profile) => profile.id === userId) || {};
 }
 
 async function init() {
@@ -144,43 +159,51 @@ async function loadAll() {
   render();
   try {
     if (!isConfigured) {
-      state.sources = SOURCE_SEEDS;
-      state.questions = QUESTION_SEEDS.map((q, i) => ({ id: `seed-q-${i}`, status: "待补充", ...q }));
+      state.sources = visibleSources(SOURCE_SEEDS);
+      state.questions = visibleSources(QUESTION_SEEDS).map((q, i) => ({ id: `seed-q-${i}`, status: "待补充", ...q }));
       state.notes = NOTE_SEEDS.map((n, i) => ({ id: `seed-n-${i}`, status: "待整理", ...n }));
       state.attachments = [];
+      state.answerSubmissions = [];
+      state.profiles = [];
       state.profile = null;
       state.loadError = "";
       return;
     }
 
     const userId = currentUserId();
-    const [questions, notes, attachments, sources, profile] = await Promise.all([
+    const [questions, notes, attachments, sources, profile, profiles] = await Promise.all([
       supabase.from("questions").select("*").eq("archived", false).order("updated_at", { ascending: false }),
       supabase.from("knowledge_notes").select("*").eq("archived", false).order("updated_at", { ascending: false }),
       supabase.from("attachments").select("*").eq("archived", false).order("created_at", { ascending: false }),
       supabase.from("sources").select("*").eq("archived", false).order("created_at", { ascending: false }),
       userId ? supabase.from("profiles").select("*").eq("id", userId).maybeSingle() : Promise.resolve({ data: null }),
+      supabase.from("profiles").select("*"),
     ]);
-    for (const res of [questions, notes, attachments, sources, profile]) {
+    for (const res of [questions, notes, attachments, sources, profile, profiles]) {
       if (res.error) throw res.error;
     }
-    state.questions = questions.data || [];
+    const submissions = await supabase.from("answer_submissions").select("*").eq("archived", false).order("created_at", { ascending: false });
+    state.answerSubmissions = submissions.error ? [] : submissions.data || [];
+    state.questions = visibleSources(questions.data || []);
     state.notes = notes.data || [];
     state.attachments = attachments.data || [];
-    state.sources = sources.data || [];
+    state.sources = visibleSources(sources.data || []);
     state.profile = profile.data;
+    state.profiles = profiles.data || [];
     state.loadError = "";
     if (!state.sources.length && state.questions.length === 0 && state.notes.length === 0) {
       state.sources = SOURCE_SEEDS;
-      state.questions = QUESTION_SEEDS.map((q, i) => ({ id: `seed-q-${i}`, status: "待补充", ...q }));
+      state.questions = visibleSources(QUESTION_SEEDS).map((q, i) => ({ id: `seed-q-${i}`, status: "待补充", ...q }));
       state.notes = NOTE_SEEDS.map((n, i) => ({ id: `seed-n-${i}`, status: "待整理", ...n }));
     }
   } catch (error) {
     state.loadError = error.message;
-    state.sources = SOURCE_SEEDS;
-    state.questions = QUESTION_SEEDS.map((q, i) => ({ id: `seed-q-${i}`, status: "待补充", ...q }));
+    state.sources = visibleSources(SOURCE_SEEDS);
+    state.questions = visibleSources(QUESTION_SEEDS).map((q, i) => ({ id: `seed-q-${i}`, status: "待补充", ...q }));
     state.notes = NOTE_SEEDS.map((n, i) => ({ id: `seed-n-${i}`, status: "待整理", ...n }));
     state.attachments = [];
+    state.answerSubmissions = [];
+    state.profiles = [];
     showToast(error.message, "bad");
   } finally {
     state.busy = false;
@@ -247,6 +270,7 @@ async function uploadFiles(files, objectType, objectId) {
 async function saveQuestion(form) {
   if (!state.session) return showToast("登录后才能新增或编辑", "bad");
   const id = form.id.value;
+  const before = id ? state.questions.find((q) => String(q.id) === String(id)) : null;
   const payload = {
     title: form.title.value.trim(),
     type: form.type.value,
@@ -273,12 +297,40 @@ async function saveQuestion(form) {
   if (error) return showToast(error.message, "bad");
   try {
     await uploadFiles(form.images.files, "question", data.id);
+    await recordAnswerSubmission(form, data, before);
   } catch (error) {
     showToast(error.message, "bad");
   }
   showToast(id ? "题目已更新" : "题目已新增");
   state.view = "questions";
   await loadAll();
+}
+
+async function recordAnswerSubmission(form, savedQuestion, before) {
+  if (!isConfigured || String(savedQuestion.id).startsWith("seed-")) return;
+  const answer = form.answer.value.trim() || form.final_answer.value.trim();
+  const analysis = form.analysis.value.trim() || form.solution_steps.value.trim();
+  const formulas = form.related_formulas.value.trim() || form.used_formulas.value.trim();
+  const previousAnswer = before?.answer || before?.final_answer || "";
+  const previousAnalysis = before?.analysis || before?.solution_steps || "";
+  const changed = answer !== previousAnswer || analysis !== previousAnalysis;
+  if (!answer && !analysis && !form.answer_submission_note.value.trim()) return;
+  if (!changed && !form.answer_submission_note.value.trim()) return;
+  const previousCount = state.answerSubmissions.filter((item) => String(item.question_id) === String(savedQuestion.id)).length;
+  const payload = {
+    question_id: savedQuestion.id,
+    answer,
+    analysis,
+    related_formulas: formulas,
+    relation_type: form.answer_submission_kind.value || (previousCount ? "supplement" : "initial"),
+    note: form.answer_submission_note.value.trim(),
+    created_by: currentUserId(),
+    updated_by: currentUserId(),
+  };
+  const { error } = await supabase.from("answer_submissions").insert(payload);
+  if (error) {
+    showToast("答案已保存，但提交记录表还没创建。请运行迁移 SQL。", "bad");
+  }
 }
 
 async function saveNote(form) {
@@ -580,6 +632,7 @@ function questionRow(q) {
 function questionDetail(q) {
   const isCalc = q.type === "计算题";
   const linkedNotes = state.notes.filter((n) => (n.related_question_ids || []).map(String).includes(String(q.id)));
+  const submissions = state.answerSubmissions.filter((item) => String(item.question_id) === String(q.id));
   shell(`
     <section class="topbar"><div><button class="ghost" data-view="questions">返回题库</button><h1>${escapeHtml(q.title)}</h1><p>${escapeHtml(chapterOf(q))} · ${escapeHtml(q.type || "")} · 来源：${escapeHtml(sourceOf(q))}</p></div><button data-edit-question="${q.id}">编辑/补充</button></section>
     <section class="detail">
@@ -590,10 +643,32 @@ function questionDetail(q) {
       ${block("答案", q.answer || q.final_answer || "这题还没有答案，欢迎补充。")}
       ${block("解析", q.analysis)}
       ${block("常见错误", q.common_mistakes)}
+      ${answerSubmissionsHtml(submissions)}
       ${attachmentHtml("question", q.id)}
       <section class="block"><h2>关联知识点</h2>${linkedNotes.map(noteRow).join("") || empty("暂未关联知识点")}</section>
     </section>
   `);
+}
+
+function answerSubmissionsHtml(submissions) {
+  if (!submissions.length) return `<section class="block"><h2>答案提交记录</h2>${empty("暂无提交记录。保存答案或解析后会记录提交人。")}</section>`;
+  const label = {
+    initial: "首次答案",
+    correction: "指出之前答案有问题",
+    supplement: "补充说明",
+  };
+  return `<section class="block"><h2>答案提交记录</h2><div class="answer-history">${submissions
+    .map((item) => {
+      const profile = profileFor(item.created_by);
+      return `<article class="answer-card">
+        <header><span class="avatar">${escapeHtml(profile.emoji_avatar || "🧪")}</span><div><b>${escapeHtml(profile.nickname || "未命名同学")}</b><small>${escapeHtml(label[item.relation_type] || item.relation_type || "提交答案")} · ${new Date(item.created_at).toLocaleString()}</small></div></header>
+        ${item.note ? `<p class="answer-note">${escapeHtml(item.note)}</p>` : ""}
+        ${item.answer ? block("答案", item.answer) : ""}
+        ${item.analysis ? block("解析/步骤", item.analysis) : ""}
+        ${item.related_formulas ? block("公式", item.related_formulas) : ""}
+      </article>`;
+    })
+    .join("")}</div></section>`;
 }
 
 function calcBlocks(q) {
@@ -663,6 +738,10 @@ function questionForm(q = {}) {
       ${input("答案", "answer", q.answer, "textarea")}
       ${input("解析", "analysis", q.analysis, "textarea")}
       ${input("相关公式", "related_formulas", q.related_formulas, "textarea")}
+      <div class="answer-submit-box">
+        ${select("本次答案提交类型", "answer_submission_kind", ["initial:首次答案", "correction:指出之前答案有问题", "supplement:在之前答案基础上补充"], "")}
+        ${input("本次提交说明", "answer_submission_note", "", "textarea")}
+      </div>
       <label>上传图片<input type="file" name="images" accept="image/*" multiple></label>
       <div class="actions"><button type="submit">保存题目</button><button type="button" class="ghost" data-view="questions">取消</button></div>
     </form>
@@ -692,7 +771,12 @@ function input(label, name, value = "", type = "input") {
 }
 
 function select(label, name, options, value = "") {
-  return `<label>${label}<select name="${name}">${options.map((o) => `<option value="${escapeHtml(o)}" ${o === value ? "selected" : ""}>${escapeHtml(o)}</option>`).join("")}</select></label>`;
+  return `<label>${label}<select name="${name}">${options
+    .map((option) => {
+      const [optionValue, optionLabel] = String(option).includes(":") ? String(option).split(/:(.*)/s) : [option, option];
+      return `<option value="${escapeHtml(optionValue)}" ${optionValue === value ? "selected" : ""}>${escapeHtml(optionLabel || optionValue)}</option>`;
+    })
+    .join("")}</select></label>`;
 }
 
 function studyView() {
