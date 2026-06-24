@@ -979,6 +979,7 @@ document.addEventListener("change", (event) => {
 document.addEventListener("input", (event) => {
   if (event.target.closest(".study-filters")) {
     const el = event.target;
+    if (el.type === "checkbox") return;
     state.studyFilters[el.name] = el.value;
     state.studyIndex = 0;
     state.studyReveal = false;
@@ -987,6 +988,7 @@ document.addEventListener("input", (event) => {
   }
   if (event.target.closest(".filters")) {
     const el = event.target;
+    if (el.type === "checkbox") return;
     state.filters[el.name] = el.value;
     render();
   }
