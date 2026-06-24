@@ -13,6 +13,7 @@ const state = {
   answerSubmissions: [],
   profiles: [],
   filters: {},
+  studyFilters: {},
   selected: null,
   studyIndex: 0,
   studyReveal: false,
@@ -138,6 +139,20 @@ function isPending(item) {
 
 function profileFor(userId) {
   return state.profiles.find((profile) => profile.id === userId) || {};
+}
+
+function formText(form, name) {
+  return form.elements[name]?.value?.trim() || "";
+}
+
+function answerKindFromText(text, previousCount = 0) {
+  if (/^【?纠错】?/.test(text)) return "correction";
+  if (/^【?补充】?/.test(text)) return "supplement";
+  return previousCount ? "supplement" : "initial";
+}
+
+function cleanAnswerText(text) {
+  return text.replace(/^【?(纠错|补充)】?\s*/u, "").trim();
 }
 
 async function init() {
@@ -272,21 +287,21 @@ async function saveQuestion(form) {
   const id = form.id.value;
   const before = id ? state.questions.find((q) => String(q.id) === String(id)) : null;
   const payload = {
-    title: form.title.value.trim(),
-    type: form.type.value,
-    chapter: form.chapter.value,
-    tags: parseTags(form.tags.value),
-    answer: form.answer.value.trim(),
-    analysis: form.analysis.value.trim(),
-    related_formulas: form.related_formulas.value.trim(),
-    source_text: form.source_text.value.trim(),
-    status: form.status.value,
-    known_conditions: form.known_conditions.value.trim(),
-    solve_goal: form.solve_goal.value.trim(),
-    used_formulas: form.used_formulas.value.trim(),
-    solution_steps: form.solution_steps.value.trim(),
-    final_answer: form.final_answer.value.trim(),
-    common_mistakes: form.common_mistakes.value.trim(),
+    title: formText(form, "title"),
+    type: formText(form, "type"),
+    chapter: formText(form, "chapter"),
+    tags: parseTags(formText(form, "tags")),
+    answer: cleanAnswerText(formText(form, "answer")),
+    analysis: "",
+    related_formulas: "",
+    source_text: formText(form, "source_text"),
+    status: formText(form, "status"),
+    known_conditions: "",
+    solve_goal: "",
+    used_formulas: "",
+    solution_steps: "",
+    final_answer: "",
+    common_mistakes: "",
     updated_by: currentUserId(),
   };
   if (!id) payload.created_by = currentUserId();
@@ -308,22 +323,20 @@ async function saveQuestion(form) {
 
 async function recordAnswerSubmission(form, savedQuestion, before) {
   if (!isConfigured || String(savedQuestion.id).startsWith("seed-")) return;
-  const answer = form.answer.value.trim() || form.final_answer.value.trim();
-  const analysis = form.analysis.value.trim() || form.solution_steps.value.trim();
-  const formulas = form.related_formulas.value.trim() || form.used_formulas.value.trim();
-  const previousAnswer = before?.answer || before?.final_answer || "";
-  const previousAnalysis = before?.analysis || before?.solution_steps || "";
-  const changed = answer !== previousAnswer || analysis !== previousAnalysis;
-  if (!answer && !analysis && !form.answer_submission_note.value.trim()) return;
-  if (!changed && !form.answer_submission_note.value.trim()) return;
+  const rawAnswer = formText(form, "answer");
+  const answer = cleanAnswerText(rawAnswer);
+  const previousAnswer = before?.answer || "";
+  const changed = answer !== previousAnswer;
+  if (!answer) return;
+  if (!changed) return;
   const previousCount = state.answerSubmissions.filter((item) => String(item.question_id) === String(savedQuestion.id)).length;
   const payload = {
     question_id: savedQuestion.id,
     answer,
-    analysis,
-    related_formulas: formulas,
-    relation_type: form.answer_submission_kind.value || (previousCount ? "supplement" : "initial"),
-    note: form.answer_submission_note.value.trim(),
+    analysis: "",
+    related_formulas: "",
+    relation_type: answerKindFromText(rawAnswer, previousCount),
+    note: "",
     created_by: currentUserId(),
     updated_by: currentUserId(),
   };
@@ -524,7 +537,6 @@ function shell(content) {
     ["questions", "题库"],
     ["notes", "知识库"],
     ["study", "刷题"],
-    ["analysis", "资料识别"],
     ["settings", "登录/个人"],
   ];
   app.innerHTML = `
@@ -553,7 +565,7 @@ function dashboard() {
     <section class="topbar">
       <div>
         <h1>学习工作台</h1>
-        <p>题库和知识库并排推进，适合几个人一起把资料慢慢补全。</p>
+        <p>请大家踊跃上传。</p>
       </div>
       <div class="user-pill">${state.profile?.emoji_avatar || "🧪"} ${escapeHtml(state.profile?.nickname || state.session?.user?.email || "未登录浏览")}</div>
     </section>
@@ -563,7 +575,7 @@ function dashboard() {
       <button data-action="pending"><b>${pending.length}</b><span>待完善</span></button>
       <button data-action="no-answer"><b>${noAnswer}</b><span>无答案题</span></button>
       <button data-action="calc-only"><b>${calcCount}</b><span>计算题</span></button>
-      <button data-view="analysis"><b>${state.sources.length || SOURCE_SEEDS.length}</b><span>资料来源</span></button>
+      <div class="metric-card"><b>${state.sources.length || SOURCE_SEEDS.length}</b><span>资料来源</span></div>
     </section>
     <section class="quick">
       <button data-view="questions">题库</button>
@@ -630,21 +642,18 @@ function questionRow(q) {
 }
 
 function questionDetail(q) {
-  const isCalc = q.type === "计算题";
   const linkedNotes = state.notes.filter((n) => (n.related_question_ids || []).map(String).includes(String(q.id)));
   const submissions = state.answerSubmissions.filter((item) => String(item.question_id) === String(q.id));
   shell(`
     <section class="topbar"><div><button class="ghost" data-view="questions">返回题库</button><h1>${escapeHtml(q.title)}</h1><p>${escapeHtml(chapterOf(q))} · ${escapeHtml(q.type || "")} · 来源：${escapeHtml(sourceOf(q))}</p></div><button data-edit-question="${q.id}">编辑/补充</button></section>
     <section class="detail">
       <div class="meta">${tagsHtml(q.tags)} <span class="status ${statusOf(q)}">${statusOf(q)}</span></div>
-      ${isCalc ? calcBlocks(q) : ""}
       ${block("题目", q.title)}
+      ${attachmentHtml("question", q.id)}
       ${block("相关公式", q.related_formulas || q.used_formulas)}
       ${block("答案", q.answer || q.final_answer || "这题还没有答案，欢迎补充。")}
       ${block("解析", q.analysis)}
-      ${block("常见错误", q.common_mistakes)}
       ${answerSubmissionsHtml(submissions)}
-      ${attachmentHtml("question", q.id)}
       <section class="block"><h2>关联知识点</h2>${linkedNotes.map(noteRow).join("") || empty("暂未关联知识点")}</section>
     </section>
   `);
@@ -664,23 +673,9 @@ function answerSubmissionsHtml(submissions) {
         <header><span class="avatar">${escapeHtml(profile.emoji_avatar || "🧪")}</span><div><b>${escapeHtml(profile.nickname || "未命名同学")}</b><small>${escapeHtml(label[item.relation_type] || item.relation_type || "提交答案")} · ${new Date(item.created_at).toLocaleString()}</small></div></header>
         ${item.note ? `<p class="answer-note">${escapeHtml(item.note)}</p>` : ""}
         ${item.answer ? block("答案", item.answer) : ""}
-        ${item.analysis ? block("解析/步骤", item.analysis) : ""}
-        ${item.related_formulas ? block("公式", item.related_formulas) : ""}
       </article>`;
     })
     .join("")}</div></section>`;
-}
-
-function calcBlocks(q) {
-  return `
-    <div class="calc-grid">
-      ${block("已知条件", q.known_conditions)}
-      ${block("求解目标", q.solve_goal)}
-      ${block("使用公式", q.used_formulas || q.related_formulas)}
-      ${block("解题步骤", q.solution_steps)}
-      ${block("最终答案", q.final_answer)}
-    </div>
-  `;
 }
 
 function block(title, value) {
@@ -720,29 +715,15 @@ function noteDetail(n) {
 
 function questionForm(q = {}) {
   shell(`
-    <section class="topbar"><div><h1>${q.id ? "编辑题目" : "新增题目"}</h1><p>支持 Markdown 图片语法和 LaTeX：行内 $V_{GS}>V_T$，块级 $$I_D=...$$。</p></div></section>
+    <section class="topbar"><div><h1>${q.id ? "编辑题目" : "新增题目"}</h1><p>答案框支持文字、LaTeX 和 Markdown 图片引用。第二个人提交时，可在答案开头写【纠错】或【补充】。</p></div></section>
     <form class="editor" data-form="question">
       <input type="hidden" name="id" value="${q.id && !String(q.id).startsWith("seed-") ? q.id : ""}">
       ${input("题目", "title", q.title, "textarea")}
       <div class="grid-3">${select("题型", "type", ["名词解释", "简答题", "计算题"], q.type)}${select("章节", "chapter", CHAPTERS, chapterOf(q))}${select("完善状态", "status", ["待补充", "待完善", "待整理", "已整理"], statusOf(q))}</div>
       ${input("标签", "tags", (q.tags || []).join(", "))}
       ${input("来源", "source_text", q.source_text || q.source)}
-      <div class="calc-editor">
-        ${input("已知条件", "known_conditions", q.known_conditions, "textarea")}
-        ${input("求解目标", "solve_goal", q.solve_goal, "textarea")}
-        ${input("使用公式", "used_formulas", q.used_formulas, "textarea")}
-        ${input("解题步骤", "solution_steps", q.solution_steps, "textarea")}
-        ${input("最终答案", "final_answer", q.final_answer, "textarea")}
-        ${input("常见错误", "common_mistakes", q.common_mistakes, "textarea")}
-      </div>
-      ${input("答案", "answer", q.answer, "textarea")}
-      ${input("解析", "analysis", q.analysis, "textarea")}
-      ${input("相关公式", "related_formulas", q.related_formulas, "textarea")}
-      <div class="answer-submit-box">
-        ${select("本次答案提交类型", "answer_submission_kind", ["initial:首次答案", "correction:指出之前答案有问题", "supplement:在之前答案基础上补充"], "")}
-        ${input("本次提交说明", "answer_submission_note", "", "textarea")}
-      </div>
-      <label>上传图片<input type="file" name="images" accept="image/*" multiple></label>
+      ${input("答案", "answer", q.answer || q.final_answer, "textarea")}
+      <label class="upload-line">上传图片<input type="file" name="images" accept="image/*" multiple></label>
       <div class="actions"><button type="submit">保存题目</button><button type="button" class="ghost" data-view="questions">取消</button></div>
     </form>
   `);
@@ -779,18 +760,46 @@ function select(label, name, options, value = "") {
     .join("")}</select></label>`;
 }
 
+function studyQuestionList() {
+  const f = state.studyFilters;
+  const p = progress();
+  return state.questions.filter((q) => {
+    const src = sourceOf(q);
+    const text = [q.title, q.answer, q.analysis, src, ...(q.tags || [])].join(" ").toLowerCase();
+    if (f.keyword && !text.includes(f.keyword.toLowerCase())) return false;
+    if (f.chapter && chapterOf(q) !== f.chapter) return false;
+    if (f.type && q.type !== f.type) return false;
+    if (f.pending && !isPending(q)) return false;
+    if (f.favOnly && !p[q.id]?.fav) return false;
+    return true;
+  });
+}
+
+function studyFiltersHtml() {
+  return `<div class="filters study-filters">
+    <input class="filter-main" name="keyword" placeholder="关键词搜索" value="${escapeHtml(state.studyFilters.keyword || "")}">
+    <select class="filter-wide" name="chapter"><option value="">全部章节</option>${CHAPTERS.map((c) => `<option ${state.studyFilters.chapter === c ? "selected" : ""}>${c}</option>`).join("")}</select>
+    <select name="type"><option value="">全部题型</option>${["名词解释", "简答题", "计算题"].map((t) => `<option ${state.studyFilters.type === t ? "selected" : ""}>${t}</option>`).join("")}</select>
+    <div class="filter-checks">
+      <label class="check"><input type="checkbox" name="pending" ${state.studyFilters.pending ? "checked" : ""}> <span>只刷待补充题</span></label>
+      <label class="check"><input type="checkbox" name="favOnly" ${state.studyFilters.favOnly ? "checked" : ""}> <span>只刷收藏题</span></label>
+      <button class="ghost" data-action="reset-study">清空刷题筛选</button>
+    </div>
+  </div>`;
+}
+
 function studyView() {
-  const base = filteredQuestions().filter((q) => !state.filters.favOnly || progress()[q.id]?.fav);
+  const base = studyQuestionList();
   const q = base[state.studyIndex % Math.max(base.length, 1)];
   const p = progress();
   shell(`
     <section class="topbar"><div><h1>刷题模式</h1><p>个人掌握程度和收藏存在 localStorage，不同步到 Supabase。</p></div></section>
-    ${filters("questions")}
-    <div class="study-tools"><label><input type="checkbox" name="favOnly" ${state.filters.favOnly ? "checked" : ""}> 只刷收藏题</label></div>
+    ${studyFiltersHtml()}
     ${q ? `<section class="study-card">
       <div class="meta">${escapeHtml(chapterOf(q))} · ${escapeHtml(q.type || "")} · ${tagsHtml(q.tags)}</div>
       <h2>${escapeHtml(q.title)}</h2>
-      ${state.studyReveal ? `${block("答案", q.answer || q.final_answer || "这题还没有答案，欢迎补充。")}${block("解析", q.analysis)}${block("公式", q.related_formulas || q.used_formulas)}${attachmentHtml("question", q.id)}` : ""}
+      ${attachmentHtml("question", q.id)}
+      ${state.studyReveal ? `${block("答案", q.answer || q.final_answer || "这题还没有答案，欢迎补充。")}${block("解析", q.analysis)}${block("公式", q.related_formulas || q.used_formulas)}` : ""}
       <div class="actions">
         <button data-action="reveal">${state.studyReveal ? "收起" : "展开答案/解析"}</button>
         <button data-progress="${q.id}:会了">会了</button>
@@ -820,7 +829,7 @@ function settingsView() {
   shell(`
     <section class="topbar"><div><h1>登录与个人信息</h1><p>未登录可以浏览；登录后可以新增、编辑和上传图片。</p></div></section>
     ${!isConfigured ? `<section class="block warn"><h2>Supabase 未配置</h2><p>填写 <code>src/config.js</code> 中的 <code>SUPABASE_URL</code> 和 <code>SUPABASE_ANON_KEY</code> 后启用真实数据库。</p></section>` : ""}
-    ${isConfigured ? `<section class="block"><h2>Supabase 状态</h2><p>项目已连接：<code>${escapeHtml(new URL(SUPABASE_URL).host)}</code></p><p>如果页面提示数据库表不存在，请在 Supabase SQL Editor 运行仓库里的 <code>supabase/schema.sql</code>。运行后回到这里点击“刷新 Supabase 数据”。</p></section>` : ""}
+    ${isConfigured ? `<section class="block"><h2>Supabase 状态</h2><p>项目已连接：<code>${escapeHtml(new URL(SUPABASE_URL).host)}</code></p><p>如果页面提示数据库表不存在，请在 Supabase SQL Editor 运行仓库里的 <code>supabase/schema.sql</code>。运行后回到这里点击“刷新 Supabase 数据”。</p><div class="actions"><button data-action="import-seed">同步内置资料到数据库</button></div></section>` : ""}
     ${state.session ? `
       <form class="editor" data-form="profile">
         <p>当前登录：${escapeHtml(state.session.user.email)}</p>
@@ -900,6 +909,12 @@ document.addEventListener("click", async (event) => {
     state.studyReveal = false;
     render();
   }
+  if (target.dataset.action === "reset-study") {
+    state.studyFilters = {};
+    state.studyIndex = 0;
+    state.studyReveal = false;
+    render();
+  }
   if (target.dataset.progress) {
     const [id, mark] = target.dataset.progress.split(":");
     const p = progress();
@@ -929,7 +944,15 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("change", (event) => {
-  if (event.target.closest(".filters") || event.target.closest(".study-tools")) {
+  if (event.target.closest(".study-filters")) {
+    const el = event.target;
+    state.studyFilters[el.name] = el.type === "checkbox" ? el.checked : el.value;
+    state.studyIndex = 0;
+    state.studyReveal = false;
+    render();
+    return;
+  }
+  if (event.target.closest(".filters")) {
     const el = event.target;
     state.filters[el.name] = el.type === "checkbox" ? el.checked : el.value;
     render();
@@ -937,6 +960,14 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  if (event.target.closest(".study-filters")) {
+    const el = event.target;
+    state.studyFilters[el.name] = el.value;
+    state.studyIndex = 0;
+    state.studyReveal = false;
+    render();
+    return;
+  }
   if (event.target.closest(".filters")) {
     const el = event.target;
     state.filters[el.name] = el.value;

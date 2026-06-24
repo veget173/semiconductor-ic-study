@@ -163,12 +163,14 @@ section, .study-card, .editor {
   box-shadow: none;
   padding: 0;
 }
-.metrics button {
+.metrics button, .metrics .metric-card {
   background: var(--panel);
   color: var(--ink);
   border: 1px solid var(--line);
   text-align: left;
   min-height: 92px;
+  border-radius: 8px;
+  padding: 12px 16px;
 }
 .metrics b {
   display: block;
@@ -291,23 +293,6 @@ label input[type="checkbox"] {
 .editor {
   display: grid;
   gap: 14px;
-}
-.calc-editor {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 12px;
-}
-.answer-submit-box {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1.3fr);
-  gap: 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 12px;
-  background: var(--bg);
 }
 .actions {
   display: flex;
@@ -481,7 +466,7 @@ code {
   }
   .main { margin-left: 0; padding: 16px; }
   nav { grid-template-columns: repeat(3, 1fr); }
-  .metrics, .split, .calc-grid, .calc-editor, .answer-submit-box, .grid-4, .grid-3, .filters {
+  .metrics, .split, .calc-grid, .grid-4, .grid-3, .filters {
     grid-template-columns: 1fr;
   }
   .topbar { flex-direction: column; }
